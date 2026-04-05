@@ -921,7 +921,7 @@ def estimate_duplicate_rows(dataframe):
     normalized_subset = dataframe[subset_columns].copy()
 
     for column in subset_columns:
-        normalized_subset[column] = normalized_subset[column].fillna("").astype(str).str.strip()
+        normalized_subset[column] = normalized_subset[column].astype("string").fillna("").str.strip()
 
     return int(normalized_subset.duplicated().sum())
 
@@ -1295,7 +1295,7 @@ def build_analysis(dataframe, filename, sheet_name, preparation_meta=None):
     used_names = {profile["name"] for profile in [date_profile, target_profile, value_profile, category_profile, entity_profile] if profile}
     primary_text_profile = choose_primary_text_profile(profiles, used_names)
     derived_text_themes = (
-        derive_text_themes(primary_text_profile["series"].astype(str).fillna(""))
+        derive_text_themes(primary_text_profile["series"].astype("string").fillna("").astype(str))
         if primary_text_profile is not None
         else None
     )
@@ -1304,7 +1304,7 @@ def build_analysis(dataframe, filename, sheet_name, preparation_meta=None):
     if secondary_category is not None:
         auxiliary_unique_count = int(secondary_category["series"].dropna().astype(str).nunique())
         if 2 <= auxiliary_unique_count <= 18:
-            auxiliary_category_series = secondary_category["series"].astype(str).fillna("غير مصنف")
+            auxiliary_category_series = secondary_category["series"].astype("string").fillna("غير مصنف").astype(str)
 
     warnings = []
     errors = []
@@ -1340,14 +1340,19 @@ def build_analysis(dataframe, filename, sheet_name, preparation_meta=None):
     value_series = value_profile["numeric_series"] if value_profile else None
     target_series = target_profile["numeric_series"] if target_profile else None
     date_series = date_profile["datetime_series"] if date_profile else None
-    theme_series = derived_text_themes["series"].astype(str).fillna("أخرى") if derived_text_themes is not None else None
-    distribution_series = category_profile["series"].astype(str).fillna("غير مصنف") if category_profile else None
+    raw_theme_series = derived_text_themes["series"] if derived_text_themes is not None else None
+    theme_series = raw_theme_series.astype("string").fillna("أخرى").astype(str) if raw_theme_series is not None else None
+    raw_category_series = category_profile["series"] if category_profile else None
+    distribution_series = raw_category_series.astype("string").fillna("غير مصنف").astype(str) if raw_category_series is not None else None
     if distribution_series is None and auxiliary_category_series is not None:
         distribution_series = auxiliary_category_series
+        raw_category_series = secondary_category["series"]
     if distribution_series is None and theme_series is not None:
         distribution_series = theme_series
+        raw_category_series = raw_theme_series
     category_series = distribution_series
-    entity_series = entity_profile["series"].astype(str).fillna("غير محدد") if entity_profile else None
+    raw_entity_series = entity_profile["series"] if entity_profile else None
+    entity_series = raw_entity_series.astype("string").fillna("غير محدد").astype(str) if raw_entity_series is not None else None
 
     selected_profiles = [profile for profile in [date_profile, value_profile, category_profile, entity_profile, primary_text_profile] if profile]
     selected_completeness = [profile["non_null"] / row_count * 100 for profile in selected_profiles if row_count]
@@ -1364,12 +1369,12 @@ def build_analysis(dataframe, filename, sheet_name, preparation_meta=None):
     average_value = safe_float(value_series.mean()) if value_profile else None
     median_value = safe_float(value_series.median()) if value_profile else None
     total_target = safe_float(target_series.sum()) if target_profile else None
-    unique_entities = int(entity_series.nunique()) if entity_profile else (int(category_series.nunique()) if category_series is not None else row_count)
-    category_count = int(category_series.nunique()) if category_series is not None else 0
-    theme_count = int(theme_series.nunique()) if theme_series is not None else 0
+    unique_entities = int(raw_entity_series.dropna().astype(str).nunique()) if raw_entity_series is not None else (int(raw_category_series.dropna().astype(str).nunique()) if raw_category_series is not None else row_count)
+    category_count = int(raw_category_series.dropna().astype(str).nunique()) if raw_category_series is not None else 0
+    theme_count = int(raw_theme_series.dropna().astype(str).nunique()) if raw_theme_series is not None else 0
     period_count = int(date_series.dropna().dt.to_period("M").nunique()) if date_series is not None and date_series.notna().sum() else 0
     value_coverage = round(value_series.notna().mean() * 100, 1) if value_profile and row_count else 0.0
-    category_coverage = round(category_series.replace("nan", pd.NA).notna().mean() * 100, 1) if category_series is not None and row_count else 0.0
+    category_coverage = round(raw_category_series.notna().mean() * 100, 1) if raw_category_series is not None and row_count else 0.0
     target_progress = round((total_value / total_target) * 100, 1) if total_value is not None and total_target not in {None, 0} else 0.0
     analysis_ready = bool(value_profile or date_profile or category_profile or primary_text_profile)
     needs_review = bool(warnings) or not analysis_ready
