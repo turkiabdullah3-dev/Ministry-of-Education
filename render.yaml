@@ -2,7 +2,6 @@ services:
   - type: web
     name: ministry-of-education-backend
     runtime: node
-    rootDir: .
     buildCommand: npm install
     startCommand: node backend/server.js
     plan: free
@@ -22,7 +21,6 @@ services:
   - type: web
     name: ministry-of-education-analysis
     runtime: python
-    rootDir: .
     buildCommand: pip install -r backend/analysis_api/requirements.txt
     startCommand: uvicorn analysis_api.main:app --host 0.0.0.0 --port $PORT
     plan: free
