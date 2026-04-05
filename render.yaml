@@ -22,7 +22,7 @@ services:
     name: ministry-of-education-analysis
     runtime: python
     buildCommand: pip install -r backend/analysis_api/requirements.txt
-    startCommand: uvicorn analysis_api.main:app --host 0.0.0.0 --port $PORT
+    startCommand: python -m uvicorn analysis_api.main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
       - key: ALLOWED_ORIGINS
