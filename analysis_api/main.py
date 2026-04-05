@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -21,13 +22,23 @@ from analysis_api.schema_mapping import build_schema_candidates
 from analysis_api.validation import build_validation_report
 
 
+def _parse_allowed_origins() -> list[str]:
+    raw = os.getenv("ALLOWED_ORIGINS", "").strip()
+    if raw:
+        return [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+
+    return [
+        "https://turki20.sa",
+        "https://www.turki20.sa",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ]
+
+
 app = FastAPI(title="analysis_api", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-    ],
+    allow_origins=_parse_allowed_origins(),
     allow_credentials=False,
     allow_methods=["POST", "OPTIONS"],
     allow_headers=["*"],
@@ -166,3 +177,8 @@ async def analyze(file: UploadFile = File(...)) -> AnalyzeResponse:
         size_bytes=len(payload),
         ingestion=ingestion,
     )
+
+
+@app.get("/health")
+async def health() -> dict[str, bool | str]:
+    return {"ok": True, "service": "analysis_api"}

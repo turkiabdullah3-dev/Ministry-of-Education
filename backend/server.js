@@ -7,7 +7,7 @@ const { URL } = require("url");
 
 const { authUser, trainees, getPublicAuthUser } = require("./data");
 
-const HOST = "127.0.0.1";
+const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 5500);
 const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
 const MAX_JSON_BODY_BYTES = 25 * 1024 * 1024;
@@ -15,7 +15,19 @@ const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
 const MAX_ANALYZER_OUTPUT_BYTES = 8 * 1024 * 1024;
 const ANALYZER_TIMEOUT_MS = 45_000;
 const ALLOWED_ANALYZER_EXTENSIONS = new Set([".xlsx", ".xls", ".csv"]);
-const ANALYSIS_API_URL = process.env.ANALYSIS_API_URL || "http://127.0.0.1:8001/analyze";
+const ANALYSIS_API_URL = normalizeAnalysisApiUrl(process.env.ANALYSIS_API_URL);
+const PUBLIC_API_ORIGIN = normalizeOrigin(process.env.PUBLIC_API_ORIGIN || "https://api.turki20.sa");
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://turki20.sa",
+  "https://www.turki20.sa",
+  "http://127.0.0.1:5500",
+  "http://localhost:5500",
+];
+const ALLOWED_ORIGINS = new Set(
+  parseOriginList(process.env.ALLOWED_ORIGINS).length
+    ? parseOriginList(process.env.ALLOWED_ORIGINS)
+    : DEFAULT_ALLOWED_ORIGINS,
+);
 const AUTH_PEPPER = process.env.AUTH_PEPPER || "moe-auth-pepper-v1";
 const AUTH_SCRYPT_OPTIONS = Object.freeze({
   N: 16_384,
@@ -44,7 +56,41 @@ const MIME_TYPES = {
 
 const INDICATOR_TONES = ["cyan", "mint", "violet", "teal", "amber", "blue"];
 
+function normalizeOrigin(value) {
+  const normalized = String(value || "").trim().replace(/\/+$/, "");
+  return normalized || "";
+}
+
+function parseOriginList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => normalizeOrigin(item))
+    .filter(Boolean);
+}
+
+function normalizeAnalysisApiUrl(value) {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "http://127.0.0.1:8001/analyze";
+  }
+
+  const withScheme = /^[a-z]+:\/\//i.test(raw) ? raw : `http://${raw}`;
+  const normalized = new URL(withScheme);
+
+  if (!normalized.pathname || normalized.pathname === "/") {
+    normalized.pathname = "/analyze";
+  }
+
+  return normalized.toString();
+}
+
 function getSecurityHeaders() {
+  const connectSources = ["'self'"];
+  if (PUBLIC_API_ORIGIN) {
+    connectSources.push(PUBLIC_API_ORIGIN);
+  }
+
   return {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -61,9 +107,24 @@ function getSecurityHeaders() {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      `connect-src ${connectSources.join(" ")}`,
       "form-action 'self'",
     ].join("; "),
+  };
+}
+
+function getCorsHeaders(request) {
+  const requestOrigin = normalizeOrigin(request?.headers?.origin);
+
+  if (!requestOrigin || !ALLOWED_ORIGINS.has(requestOrigin)) {
+    return {};
+  }
+
+  return {
+    "Access-Control-Allow-Origin": requestOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept",
+    Vary: "Origin",
   };
 }
 
@@ -951,6 +1012,7 @@ async function handleApiRequest(request, response, pathname) {
   if (request.method === "OPTIONS") {
     sendEmpty(response, 204, {
       Allow: "GET, POST, HEAD, OPTIONS",
+      ...getCorsHeaders(request),
     });
     return true;
   }
@@ -959,7 +1021,15 @@ async function handleApiRequest(request, response, pathname) {
     sendJson(response, 200, {
       authUser: getPublicAuthUser(),
       trainees,
-    });
+    }, getCorsHeaders(request));
+    return true;
+  }
+
+  if (request.method === "GET" && pathname === "/health") {
+    sendJson(response, 200, {
+      ok: true,
+      service: "backend",
+    }, getCorsHeaders(request));
     return true;
   }
 
@@ -972,6 +1042,7 @@ async function handleApiRequest(request, response, pathname) {
       },
       {
         Allow: "POST, OPTIONS",
+        ...getCorsHeaders(request),
       },
     );
     return true;
@@ -987,28 +1058,28 @@ async function handleApiRequest(request, response, pathname) {
       if (!username || !password) {
         sendJson(response, 400, {
           message: "أدخل رمز المستخدم وكلمة المرور للمتابعة.",
-        });
+        }, getCorsHeaders(request));
         return true;
       }
 
       if (!isAuthorizedLogin(username, password)) {
         sendJson(response, 401, {
           message: "بيانات الدخول غير صحيحة. تأكد من رمز المستخدم وكلمة المرور.",
-        });
+        }, getCorsHeaders(request));
         return true;
       }
 
       sendJson(response, 200, {
         user: getPublicAuthUser(),
         receipt: buildLoginReceipt(username),
-      });
+      }, getCorsHeaders(request));
       return true;
     } catch (error) {
       const message = resolveJsonError(error, "تعذر قراءة بيانات الطلب.");
       const statusCode = message.includes("كثرة المحاولات") ? 429 : 400;
       sendJson(response, statusCode, {
         message,
-      });
+      }, getCorsHeaders(request));
       return true;
     }
   }
@@ -1022,6 +1093,7 @@ async function handleApiRequest(request, response, pathname) {
       },
       {
         Allow: "POST, OPTIONS",
+        ...getCorsHeaders(request),
       },
     );
     return true;
@@ -1035,14 +1107,14 @@ async function handleApiRequest(request, response, pathname) {
 
       sendJson(response, 200, {
         analysis,
-      });
+      }, getCorsHeaders(request));
       return true;
     } catch (error) {
       const message = resolveJsonError(error, "تعذر تحليل ملف المؤشرات.");
       const statusCode = message.includes("كثرة المحاولات") ? 429 : 400;
       sendJson(response, statusCode, {
         message,
-      });
+      }, getCorsHeaders(request));
       return true;
     }
   }

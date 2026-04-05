@@ -9,12 +9,29 @@ let scrollRevealObserver = null;
 let appControlsBound = false;
 let dashboardMotionFrame = null;
 const INTRO_SPLASH_DURATION = 2200;
+const PRODUCTION_FRONTEND_HOSTS = new Set(["turki20.sa", "www.turki20.sa"]);
+const PRODUCTION_API_ORIGIN = "https://api.turki20.sa";
+
+function getApiBaseUrl() {
+  const configured = document
+    .querySelector('meta[name="app-api-base-url"]')
+    ?.getAttribute("content")
+    ?.trim();
+
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+
+  return PRODUCTION_FRONTEND_HOSTS.has(window.location.hostname) ? PRODUCTION_API_ORIGIN : "";
+}
+
+const API_BASE_URL = getApiBaseUrl();
 const API_ENDPOINTS = {
-  bootstrap: "/api/bootstrap",
-  login: "/api/login",
-  analyzeIndicators: "/api/indicators/analyze",
+  bootstrap: `${API_BASE_URL}/api/bootstrap`,
+  login: `${API_BASE_URL}/api/login`,
+  analyzeIndicators: `${API_BASE_URL}/api/indicators/analyze`,
 };
-const ANALYSIS_API_EXPERIMENT_URL = "http://127.0.0.1:8001/analyze";
+const ANALYSIS_API_EXPERIMENT_URL = API_ENDPOINTS.analyzeIndicators;
 
 const apiState = {
   authUser: null,
@@ -3951,21 +3968,16 @@ async function runIndicatorsApiExperiment() {
   renderCurrentView();
 
   try {
-    const formData = new FormData();
-    formData.append("file", file, file.name);
-
-    const response = await fetch(ANALYSIS_API_EXPERIMENT_URL, {
+    const fileBase64 = await readFileAsBase64(file);
+    const payload = await apiRequest(ANALYSIS_API_EXPERIMENT_URL, {
       method: "POST",
-      body: formData,
+      body: JSON.stringify({
+        filename: file.name,
+        fileBase64,
+      }),
     });
 
-    const payload = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(payload?.detail || payload?.message || "فشل الاتصال بخدمة التحليل");
-    }
-
-    uiState.indicatorsApiExperimentResult = payload;
+    uiState.indicatorsApiExperimentResult = payload.analysis || null;
     uiState.indicatorsApiExperimentState = "ready";
     uiState.indicatorsApiExperimentError = "";
   } catch (error) {
